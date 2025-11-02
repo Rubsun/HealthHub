@@ -1,0 +1,146 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: healthhub-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-healthhub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-healthhub_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-healthhub}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U healthhub"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: healthhub-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-admin123}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  users-service:
+    build:
+      context: .
+      dockerfile: services/users-service/Dockerfile
+    container_name: healthhub-users-service
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-healthhub}:${POSTGRES_PASSWORD:-healthhub_pass}@postgres:5432/${POSTGRES_DB:-healthhub}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-admin123}@rabbitmq:5672/
+      SERVICE_PORT: 8001
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    working_dir: /app
+    command: sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8001"
+
+  health-service:
+    build:
+      context: .
+      dockerfile: services/health-service/Dockerfile
+    container_name: healthhub-health-service
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-healthhub}:${POSTGRES_PASSWORD:-healthhub_pass}@postgres:5432/${POSTGRES_DB:-healthhub}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-admin123}@rabbitmq:5672/
+      SERVICE_PORT: 8002
+      USERS_SERVICE_URL: http://users-service:8001
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      users-service:
+        condition: service_started
+    working_dir: /app
+    command: sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8002"
+
+  nutrition-service:
+    build:
+      context: .
+      dockerfile: services/nutrition-service/Dockerfile
+    container_name: healthhub-nutrition-service
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-healthhub}:${POSTGRES_PASSWORD:-healthhub_pass}@postgres:5432/${POSTGRES_DB:-healthhub}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-admin123}@rabbitmq:5672/
+      SERVICE_PORT: 8003
+      OPENFOODFACTS_API_URL: https://world.openfoodfacts.org/api/v2
+    ports:
+      - "8003:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    working_dir: /app
+    command: sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8003"
+
+  integrations-service:
+    build:
+      context: .
+      dockerfile: services/integrations-service/Dockerfile
+    container_name: healthhub-integrations-service
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-healthhub}:${POSTGRES_PASSWORD:-healthhub_pass}@postgres:5432/${POSTGRES_DB:-healthhub}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-admin123}@rabbitmq:5672/
+      SERVICE_PORT: 8004
+      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY:-}
+      OPENWEATHER_API_URL: https://api.openweathermap.org/data/2.5
+    ports:
+      - "8004:8004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    working_dir: /app
+    command: sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8004"
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    container_name: healthhub-api-gateway
+    environment:
+      SERVICE_PORT: 8000
+      USERS_SERVICE_URL: http://users-service:8001
+      HEALTH_SERVICE_URL: http://health-service:8002
+      NUTRITION_SERVICE_URL: http://nutrition-service:8003
+      INTEGRATIONS_SERVICE_URL: http://integrations-service:8004
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-admin123}@rabbitmq:5672/
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-your-secret-key-change-in-production}
+    ports:
+      - "8000:8000"
+    depends_on:
+      users-service:
+        condition: service_started
+      health-service:
+        condition: service_started
+      nutrition-service:
+        condition: service_started
+      integrations-service:
+        condition: service_started
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+
+volumes:
+  postgres_data:
+

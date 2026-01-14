@@ -11,5 +11,6 @@ logger = logging.getLogger(__name__)
 
 
 if __name__ == "__main__":
-    logger.info("Starting integrations-service consumer process...")
+    logger.info("Starting health-service consumer process...")
     asyncio.run(run_consumer())
+

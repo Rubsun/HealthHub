@@ -1,21 +1,28 @@
 import pytest
 from uuid import uuid4
 from datetime import datetime
-
-import sys
+import importlib.util
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "services" / "integrations-service"))
 
-from domain.entities import WeatherLog
-from domain.repositories import WeatherLogRepository
+def load_module_from_path(module_name: str, file_path: Path):
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-class MockWeatherLogRepository(WeatherLogRepository):
+service_path = Path(__file__).parent.parent / "services" / "integrations-service"
+entities_module = load_module_from_path("integrations_entities", service_path / "domain" / "entities.py")
+
+WeatherLog = entities_module.WeatherLog
+
+
+class MockWeatherLogRepository:
     def __init__(self):
         self.logs = []
 
-    async def create(self, log: WeatherLog) -> WeatherLog:
+    async def create(self, log) -> object:
         self.logs.append(log)
         return log
 
@@ -33,7 +40,6 @@ class MockWeatherLogRepository(WeatherLogRepository):
 @pytest.mark.asyncio
 async def test_create_weather_log():
     repository = MockWeatherLogRepository()
-    
     log = WeatherLog(
         city="Moscow",
         temperature=15.5,
@@ -41,9 +47,7 @@ async def test_create_weather_log():
         humidity=60,
         wind_speed=3.2
     )
-    
     created_log = await repository.create(log)
-    
     assert created_log.city == "Moscow"
     assert created_log.temperature == 15.5
     assert created_log.description == "clear sky"
@@ -54,20 +58,26 @@ async def test_create_weather_log():
 @pytest.mark.asyncio
 async def test_get_latest_weather_by_city():
     repository = MockWeatherLogRepository()
-    
     log1 = WeatherLog(city="Moscow", temperature=15.0, description="sunny")
     log2 = WeatherLog(city="Moscow", temperature=16.0, description="cloudy")
     log3 = WeatherLog(city="SPB", temperature=12.0, description="rainy")
-    
     await repository.create(log1)
     await repository.create(log2)
     await repository.create(log3)
-    
     latest = await repository.get_latest_by_city("Moscow")
-    
     assert latest is not None
     assert latest.city == "Moscow"
     assert latest.temperature == 16.0
+
+
+@pytest.mark.asyncio
+async def test_get_weather_history():
+    repository = MockWeatherLogRepository()
+    for i in range(5):
+        log = WeatherLog(city="Moscow", temperature=15.0 + i, description=f"weather {i}")
+        await repository.create(log)
+    history = await repository.get_by_city("Moscow", limit=3)
+    assert len(history) == 3
 
 
 def test_weather_log_entity():
@@ -78,7 +88,6 @@ def test_weather_log_entity():
         humidity=60,
         wind_speed=3.2
     )
-    
     assert log.city == "Moscow"
     assert log.temperature == 15.5
     assert log.description == "clear sky"
@@ -86,4 +95,3 @@ def test_weather_log_entity():
     assert log.wind_speed == 3.2
     assert log.log_id is not None
     assert log.recorded_at is not None
-

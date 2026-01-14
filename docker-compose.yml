@@ -12,6 +12,8 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - healthhub-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U healthhub"]
       interval: 5s
@@ -27,6 +29,8 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
+    networks:
+      - healthhub-network
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 10s
@@ -42,15 +46,22 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-healthhub}:${POSTGRES_PASSWORD:-healthhub_pass}@postgres:5432/${POSTGRES_DB:-healthhub}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-admin123}@rabbitmq:5672/
       SERVICE_PORT: 8001
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
     ports:
       - "8001:8001"
+    networks:
+      - healthhub-network
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
     working_dir: /app
-    command: sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8001"
+    command: >
+      sh -c "python /app/scripts/wait_for_db.py && 
+             alembic upgrade head && 
+             uvicorn main:app --host 0.0.0.0 --port 8001"
 
   health-service:
     build:
@@ -62,8 +73,12 @@ services:
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-admin123}@rabbitmq:5672/
       SERVICE_PORT: 8002
       USERS_SERVICE_URL: http://users-service:8001
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
     ports:
       - "8002:8002"
+    networks:
+      - healthhub-network
     depends_on:
       postgres:
         condition: service_healthy
@@ -72,7 +87,34 @@ services:
       users-service:
         condition: service_started
     working_dir: /app
-    command: sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8002"
+    command: >
+      sh -c "python /app/scripts/wait_for_db.py && 
+             alembic upgrade head && 
+             uvicorn main:app --host 0.0.0.0 --port 8002"
+
+  health-service-consumer:
+    build:
+      context: .
+      dockerfile: services/health-service/Dockerfile
+    container_name: healthhub-health-consumer
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-healthhub}:${POSTGRES_PASSWORD:-healthhub_pass}@postgres:5432/${POSTGRES_DB:-healthhub}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-admin123}@rabbitmq:5672/
+      USERS_SERVICE_URL: http://users-service:8001
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+    networks:
+      - healthhub-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      health-service:
+        condition: service_started
+    working_dir: /app
+    command: python main_consumer.py
+    restart: unless-stopped
 
   nutrition-service:
     build:
@@ -84,15 +126,46 @@ services:
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-admin123}@rabbitmq:5672/
       SERVICE_PORT: 8003
       OPENFOODFACTS_API_URL: https://world.openfoodfacts.org/api/v2
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
     ports:
       - "8003:8003"
+    networks:
+      - healthhub-network
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
     working_dir: /app
-    command: sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8003"
+    command: >
+      sh -c "python /app/scripts/wait_for_db.py && 
+             alembic upgrade head && 
+             uvicorn main:app --host 0.0.0.0 --port 8003"
+
+  nutrition-service-consumer:
+    build:
+      context: .
+      dockerfile: services/nutrition-service/Dockerfile
+    container_name: healthhub-nutrition-consumer
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-healthhub}:${POSTGRES_PASSWORD:-healthhub_pass}@postgres:5432/${POSTGRES_DB:-healthhub}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-admin123}@rabbitmq:5672/
+      OPENFOODFACTS_API_URL: https://world.openfoodfacts.org/api/v2
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+    networks:
+      - healthhub-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      nutrition-service:
+        condition: service_started
+    working_dir: /app
+    command: python main_consumer.py
+    restart: unless-stopped
 
   integrations-service:
     build:
@@ -105,15 +178,47 @@ services:
       SERVICE_PORT: 8004
       OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY:-}
       OPENWEATHER_API_URL: https://api.openweathermap.org/data/2.5
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
     ports:
       - "8004:8004"
+    networks:
+      - healthhub-network
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
     working_dir: /app
-    command: sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8004"
+    command: >
+      sh -c "python /app/scripts/wait_for_db.py && 
+             alembic upgrade head && 
+             uvicorn main:app --host 0.0.0.0 --port 8004"
+
+  integrations-service-consumer:
+    build:
+      context: .
+      dockerfile: services/integrations-service/Dockerfile
+    container_name: healthhub-integrations-consumer
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-healthhub}:${POSTGRES_PASSWORD:-healthhub_pass}@postgres:5432/${POSTGRES_DB:-healthhub}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-admin123}@rabbitmq:5672/
+      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY:-}
+      OPENWEATHER_API_URL: https://api.openweathermap.org/data/2.5
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+    networks:
+      - healthhub-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      integrations-service:
+        condition: service_started
+    working_dir: /app
+    command: python main_consumer.py
+    restart: unless-stopped
 
   api-gateway:
     build:
@@ -130,6 +235,8 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-your-secret-key-change-in-production}
     ports:
       - "8000:8000"
+    networks:
+      - healthhub-network
     depends_on:
       users-service:
         condition: service_started
@@ -141,6 +248,9 @@ services:
         condition: service_started
     command: uvicorn main:app --host 0.0.0.0 --port 8000
 
+networks:
+  healthhub-network:
+    driver: bridge
+
 volumes:
   postgres_data:
-

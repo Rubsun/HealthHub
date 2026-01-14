@@ -11,10 +11,8 @@ WORKDIR /app
 
 COPY --from=builder /root/.local /root/.local
 COPY services/integrations-service/ .
+COPY scripts/ /app/scripts/
 
 ENV PATH=/root/.local/bin:$PATH
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8004"]
-
-
-

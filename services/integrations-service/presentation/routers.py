@@ -1,25 +1,20 @@
 import logging
 from typing import List
-from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends
-from faststream import FastStream
-from faststream.rabbit import RabbitBroker
+from fastapi import APIRouter, HTTPException
 
 from application.services import WeatherService
 from presentation.schemas import WeatherLogResponse, WeatherFetchRequest
-from infrastructure.settings import settings
 
 logger = logging.getLogger(__name__)
 
 weather_router = APIRouter()
 weather_service = WeatherService()
 
-broker = RabbitBroker(settings.rabbitmq_url)
-
 
 @weather_router.post("/fetch", response_model=WeatherLogResponse, status_code=201)
 async def fetch_weather(request: WeatherFetchRequest):
+    """Fetch current weather for a city and save to database."""
     try:
         weather_log = await weather_service.fetch_and_save_weather(request.city)
         if not weather_log:
@@ -41,6 +36,7 @@ async def fetch_weather(request: WeatherFetchRequest):
 
 @weather_router.get("/{city}/latest", response_model=WeatherLogResponse)
 async def get_latest_weather(city: str):
+    """Get the latest weather data for a city."""
     weather_log = await weather_service.get_latest_weather(city)
     if not weather_log:
         raise HTTPException(status_code=404, detail="Weather data not found")
@@ -58,6 +54,7 @@ async def get_latest_weather(city: str):
 
 @weather_router.get("/{city}/history", response_model=List[WeatherLogResponse])
 async def get_weather_history(city: str, limit: int = 10):
+    """Get weather history for a city."""
     logs = await weather_service.get_weather_history(city, limit)
     return [
         WeatherLogResponse(
@@ -72,6 +69,3 @@ async def get_weather_history(city: str, limit: int = 10):
         )
         for log in logs
     ]
-
-
-
